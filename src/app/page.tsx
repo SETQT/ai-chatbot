@@ -1,21 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import ChatPage from './components/ChatPage';
-import DictionaryPage from './components/DictionaryPage';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const [activePage, setActivePage] = useState('chat');
+  const router = useRouter();
 
-  const handleNavigate = (key: string) => {
-    setActivePage(key);
-  };
+  useEffect(() => {
+    router.replace('/chat');
+  }, [router]);
 
-  switch (activePage) {
-    case 'dictionary':
-      return <DictionaryPage onNavigate={handleNavigate} />;
-    case 'chat':
-    default:
-      return <ChatPage onNavigate={handleNavigate} />;
-  }
+  return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
 }
