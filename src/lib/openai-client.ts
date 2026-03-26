@@ -7,6 +7,7 @@ export interface OpenAIResponseOptions {
   instructions: string;
   input: string | { role: string; content: string }[];
   stream?: boolean;
+  response_format?: any;
 }
 
 export async function openAIChatRequest(options: OpenAIResponseOptions) {
@@ -18,27 +19,41 @@ export async function openAIChatRequest(options: OpenAIResponseOptions) {
   // ✅ Normalize input đúng schema Responses API
   const input =
     typeof options.input === 'string'
-      ? options.input
-      : options.input.map((m) => ({
-        role: m.role,
-        content: [
+      ? [
           {
-            type: m.role === 'assistant' ? 'output_text' : 'input_text',
-            text: m.content || '',
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: options.input,
+              },
+            ],
           },
-        ],
-      }));
+        ]
+      : options.input.map((m) => ({
+          role: m.role,
+          content: [
+            {
+              type: m.role === 'assistant' ? 'output_text' : 'input_text',
+              text: m.content || '',
+            },
+          ],
+        }));
 
   if (!input || (Array.isArray(input) && input.length === 0)) {
     throw new Error('Input cannot be empty for OpenAI Responses API');
   }
 
-  const payload = {
+  const payload: any = {
     model: options.model || 'gpt-4.1',
     instructions: options.instructions || '',
     input,
     stream: options.stream ?? false,
   };
+
+  if (options.response_format) {
+    payload.response_format = options.response_format;
+  }
 
   const executeRequest = async (retryCount = 0): Promise<Response> => {
     try {

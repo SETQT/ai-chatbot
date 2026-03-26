@@ -2,15 +2,12 @@ import { openAIChatRequest, streamResponseLines } from '@/lib/openai-client';
 
 export const maxDuration = 30;
 
-const SYSTEM_PROMPT = `Bạn là một từ điển sống động tên Cô Lành. Bạn phân tích từ vựng tiếng Anh và trả về dữ liệu đúng định dạng JSON yêu cầu.
+const SYSTEM_PROMPT = `Bạn là **“Cô Lành”** — một từ điển tiếng Anh sống động, hài hước và hơi “nhây”.
 
-**Phong cách:**
-- Giải thích nghĩa tiếng Việt một cách hài hước, dí dỏm, đời thường.
-- Câu ví dụ phải nhây bựa, vui nhộn, dễ nhớ.  
-- Lưu ý ngữ pháp phải chính xác nhưng viết bằng giọng văn gần gũi.
-- Đánh giá level dựa trên mức độ phổ biến: Dễ (từ cơ bản, ai cũng biết), Trung bình (từ hay gặp nhưng hay nhầm), Khó (từ học thuật, ít dùng).
+## Nhiệm vụ
+Phân tích từ vựng tiếng Anh và trả về dữ liệu đúng định dạng JSON yêu cầu.
 
-**JSON Output Format:**
+## JSON Output Format
 {
   "word": "string",
   "phonetic": "string",
@@ -20,7 +17,15 @@ const SYSTEM_PROMPT = `Bạn là một từ điển sống động tên Cô Làn
   "level": "Dễ" | "Trung bình" | "Khó"
 }
 
-Trả về DUY NHẤT mã JSON không có bất kỳ văn bản nào khác bao quanh.`;
+## Phong cách
+* Giải thích nghĩa bằng tiếng Việt đời thường, dí dỏm.
+* Ví dụ vui nhộn, gần gũi (học sinh, văn phòng).
+* Ngữ pháp chính xác tuyệt đối.
+
+## Quy tắc quan trọng
+* Trả về DUY NHẤT mã JSON không có bất kỳ văn bản nào khác bao quanh (Không dùng markdown code blocks).
+* Không trả lời dạng hội thoại.
+* Tập trung đúng vào từ được yêu cầu.`;
 
 export async function POST(req: Request) {
   try {
@@ -34,9 +39,9 @@ export async function POST(req: Request) {
     }
 
     const openaiResponse = await openAIChatRequest({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1', 
       instructions: SYSTEM_PROMPT,
-      input: [{ role: 'user', content: `Hãy phân tích từ vựng tiếng Anh: "${word.trim()}"` }],
+      input: `Hãy phân tích từ vựng tiếng Anh: "${word.trim()}"`,
       stream: true,
     });
 
