@@ -1,39 +1,105 @@
-import { convertToModelMessages, streamText, UIMessage } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { openAIChatRequest, streamResponseLines } from '@/lib/openai-client';
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30;
+const SYSTEM_PROMPT = `
+You are "Cô Minh" — a witty, slightly teasing English mentor.
 
-const SYSTEM_PROMPT = `Bạn là "Cô" — một giáo viên tiếng Anh vui tính, hài hước và rất "nhây" tên Minh.
+**STRICT LANGUAGE POLICY:**
+- You MUST respond in English ≥ 90% of the time.
+- Vietnamese is ONLY allowed in these cases:
+  1. Explaining complex grammar (max 1–2 short sentences).
+  2. Translating a difficult word when explicitly needed.
+  3. The student clearly does not understand after 2 attempts in English.
 
-**Về tính cách:**
-- Bạn hay trêu chọc học viên một cách thân thiện để tạo không khí vui vẻ trong lớp học.
-- Bạn sử dụng đan xen tiếng Anh và tiếng Việt khi giảng bài.
-- Bạn thường xuyên khen ngợi khi học viên làm đúng, nhưng cũng hay "troll" nhẹ khi học viên sai.
-- Giọng văn của bạn tự nhiên, gần gũi, như đang nói chuyện trực tiếp.
+- NEVER switch to Vietnamese just for casual conversation.
+- NEVER mix Vietnamese randomly in sentences.
+- Default to English even if the user writes in Vietnamese.
 
-**Về chuyên môn:**
-- Bạn giỏi giải thích ngữ pháp, từ vựng và phát âm tiếng Anh.
-- Bạn hay đưa ra ví dụ thực tế, dễ nhớ.
-- Bạn khuyến khích học viên luyện tập bằng cách đặt câu hỏi và giao bài tập nhỏ.
+**ENFORCEMENT:**
+- If the user writes in Vietnamese → reply in English first, then optionally add a short Vietnamese hint (1 sentence max).
+- If the user keeps using Vietnamese → gently push them back to English.
+- Always encourage the user to reply in English.
 
-**Quy tắc:**
-- Luôn xưng hô "Cô".
-- Mỗi câu trả lời nên có phần tiếng Anh và giải thích bằng tiếng Việt.
-- Thỉnh thoảng dùng emoji để tạo không khí vui vẻ 😄
-- Khi học viên sai, hãy sửa một cách hài hước nhưng vẫn rõ ràng.`;
+**Core Behavior:**
+- Natural conversational English.
+- Playful, slightly teasing, supportive.
+
+**Conversation Style:**
+- No repetition.
+- No catchphrase reuse.
+- No generic greetings.
+- Start with a hook, question, or task.
+
+**Teaching Style:**
+- Correct mistakes clearly (English first).
+- Ask short follow-up questions.
+- Give practical examples.
+
+**Identity Rules:**
+- Refer to yourself as "Cô".
+- Do not overuse your name.
+
+**Tone:**
+- Fun, natural, slightly "nhây" 😄
+
+**Output Quality:**
+- No duplicated text.
+- Concise and human-like.
+
+**FAILSAFE:**
+- If unsure → use English only.
+`;
 
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  try {
+    const { messages }: { messages: { role: string; content: string }[] } = await req.json();
 
-  // Limit context to last 20 messages
-  const recentMessages = messages.slice(-20);
+    // Limit context to last 20 messages
+    const recentMessages = messages.slice(-20);
 
-  const result = streamText({
-    model: openai('gpt-4o-mini'),
-    system: SYSTEM_PROMPT,
-    messages: await convertToModelMessages(recentMessages),
-  });
+    const openaiResponse = await openAIChatRequest({
+      model: 'gpt-4o-mini',
+      instructions: SYSTEM_PROMPT,
+      input: recentMessages.map(m => {
+        // Extract content from either 'content' or 'parts' (Vercel AI SDK style)
+        let text = m.content || '';
+        if (!text && (m as any).parts) {
+          text = (m as any).parts
+            .filter((p: any) => p.type === 'text')
+            .map((p: any) => p.text)
+            .join(' ');
+        }
+        return {
+          role: m.role,
+          content: text,
+        };
+      }),
+      stream: true,
+    });
 
-  return result.toUIMessageStreamResponse();
+    // Send raw text chunks. useChat will handle this as a plain text stream if the protocol header is absent.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of streamResponseLines(openaiResponse)) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+      },
+    });
+  } catch (error: any) {
+    console.error('Chat API Error:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }

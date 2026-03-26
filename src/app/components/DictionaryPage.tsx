@@ -26,23 +26,11 @@ import {
   SettingOutlined,
   SearchOutlined,
   BellOutlined,
-  StarOutlined,
   SoundOutlined,
 } from '@ant-design/icons';
-import { experimental_useObject as useObject } from '@ai-sdk/react';
-import { z } from 'zod';
 
 const { Sider, Content, Header } = Layout;
 const { Title, Text } = Typography;
-
-const vocabularySchema = z.object({
-  word: z.string().describe('Từ tiếng Anh'),
-  phonetic: z.string().describe('Phiên âm IPA'),
-  meaning: z.string().describe('Nghĩa tiếng Việt'),
-  example: z.string().describe('Câu ví dụ'),
-  grammar_notes: z.array(z.string()).describe('Lưu ý ngữ pháp'),
-  level: z.enum(['Dễ', 'Trung bình', 'Khó']).describe('Cấp độ'),
-});
 
 const levelColorMap: Record<string, string> = {
   'Dễ': 'green',
@@ -54,26 +42,94 @@ interface DictionaryPageProps {
   onNavigate: (key: string) => void;
 }
 
+interface VocabularyObject {
+  word?: string;
+  phonetic?: string;
+  meaning?: string;
+  example?: string;
+  grammar_notes?: string[];
+  level?: string;
+}
+
 export default function DictionaryPage({ onNavigate }: DictionaryPageProps) {
   const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [object, setObject] = useState<VocabularyObject | null>(null);
 
-  const { object, submit, isLoading, error } = useObject({
-    api: '/api/dictionary',
-    schema: vocabularySchema,
-  });
+  const fetchDictionary = async (word: string) => {
+    setIsLoading(true);
+    setObject(null);
+
+    try {
+      const response = await fetch('/api/dictionary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word }),
+      });
+
+      if (!response.ok) throw new Error('API Error');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value, { stream: true });
+          accumulatedText += text;
+
+          // Attempt to parse mid-stream if we have valid JSON
+          // Minimal partial parsing for JSON is difficult, so we'll try basic validation
+          try {
+            // Find start of JSON object {
+            const indexStart = accumulatedText.indexOf('{');
+            if (indexStart !== -1) {
+              const attemptStr = accumulatedText.slice(indexStart);
+              // Crude way to handle partial JSON is hard; 
+              // for now we'll just update when more characters look like a full object
+              // In production, we'd use a parser like json-joy or similar
+              if (attemptStr.endsWith('}') || attemptStr.includes('"}')) {
+                const parsed = JSON.parse(attemptStr + (attemptStr.endsWith('}') ? '' : '}'));
+                setObject(parsed);
+              }
+            }
+          } catch (e) {
+            // Ignore partial parse errors
+          }
+        }
+        
+        // Final Parse
+        try {
+          const finalParsed = JSON.parse(accumulatedText);
+          setObject(finalParsed);
+        } catch (e) {
+          console.error('Final JSON parse error:', e);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      message.error('AI không thể định nghĩa được từ này, thử từ khác nhé!');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSearch = () => {
     if (!inputValue.trim()) {
       message.warning('Nhập từ vựng vào đi bạn ơi! 😅');
       return;
     }
-    if (isLoading) return;
-    submit({ word: inputValue.trim() });
+    if (inputValue.length > 100) {
+      message.error('Từ gì mà dài thế! Tối đa 100 kí tự thôi nhé! 😅');
+      return;
+    }
+    const word = inputValue.trim();
+    setInputValue('');
+    fetchDictionary(word);
   };
-
-  if (error) {
-    message.error('AI không thể định nghĩa được từ này, thử từ khác nhé!');
-  }
 
   const menuItems = [
     { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
@@ -152,6 +208,8 @@ export default function DictionaryPage({ onNavigate }: DictionaryPageProps) {
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   placeholder='Nhập từ vựng, ví dụ: "procrastinate"'
+                  maxLength={100}
+                  showCount
                   prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
                   suffix={
                     <Button
@@ -263,7 +321,7 @@ export default function DictionaryPage({ onNavigate }: DictionaryPageProps) {
                       className="dict-suggestion-tag"
                       onClick={() => {
                         setInputValue(w);
-                        submit({ word: w });
+                        fetchDictionary(w);
                       }}
                     >
                       {w}

@@ -1,8 +1,8 @@
 'use client';
 
-import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Layout,
   Menu,
@@ -11,6 +11,7 @@ import {
   Typography,
   Avatar,
   Badge,
+  message,
 } from 'antd';
 import {
   SendOutlined,
@@ -55,13 +56,9 @@ interface ChatPageProps {
 
 export default function ChatPage({ onNavigate }: ChatPageProps) {
   const [inputValue, setInputValue] = useState('');
+  const [messages, setMessages] = useState<{ id: string; role: string; content: string; parts: { type: string; text: string }[] }[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const { messages, sendMessage, status } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
-  });
-
-  const isLoading = status === 'streaming' || status === 'submitted';
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -69,13 +66,80 @@ export default function ChatPage({ onNavigate }: ChatPageProps) {
 
   const handleSend = () => {
     if (!inputValue.trim() || isLoading) return;
-    sendMessage({ text: inputValue });
+    if (inputValue.length > 100) {
+      message.error('Câu hỏi dài quá nè, tối đa 100 kí tự thôi nhé! 😅');
+      return;
+    }
+    const text = inputValue;
     setInputValue('');
+    sendMessage({ text });
   };
 
   const onFeatureClick = (prompt: string) => {
     if (isLoading) return;
+    setInputValue('');
     sendMessage({ text: prompt });
+  };
+
+  const sendMessage = async (input: { text: string }) => {
+    if (!input.text.trim()) return;
+    
+    setIsLoading(true);
+    const userMessageId = Date.now().toString();
+    const newUserMessage = {
+      id: userMessageId,
+      role: 'user',
+      content: input.text,
+      parts: [{ type: 'text', text: input.text }],
+    };
+    
+    setMessages((prev) => [...prev, newUserMessage]);
+
+    const assistantMsgId = (Date.now() + 1).toString();
+    let accumulatedText = '';
+
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: [...messages, newUserMessage].map(m => ({ role: m.role, content: m.content })) 
+        }),
+      });
+
+      if (!resp.ok) throw new Error('Failed to fetch chat');
+
+      const reader = resp.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        // Initial assistant message
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantMsgId, role: 'assistant', content: '', parts: [{ type: 'text', text: '' }] },
+        ]);
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          accumulatedText += chunk;
+
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? { ...msg, content: accumulatedText, parts: [{ type: 'text', text: accumulatedText }] }
+                : msg
+            )
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Chat error:', err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -152,13 +216,21 @@ export default function ChatPage({ onNavigate }: ChatPageProps) {
               {messages.map((m) => (
                 <div key={m.id} className={`message-item ${m.role === 'user' ? 'user' : 'assistant'}`}>
                   <div className="bubble">
-                    {m.parts.map((p, i) => (p.type === 'text' ? <span key={i}>{p.text}</span> : null))}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {m.content}
+                    </ReactMarkdown>
                   </div>
                 </div>
               ))}
               {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
                 <div className="message-item assistant">
-                  <div className="bubble" style={{ fontStyle: 'italic', opacity: 0.7 }}>Cô Minh đang soạn bài...</div>
+                  <div className="bubble">
+                    <div className="typing-indicator">
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
+                    </div>
+                  </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -173,9 +245,11 @@ export default function ChatPage({ onNavigate }: ChatPageProps) {
             <Input
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              onPressEnter={handleSend}
               placeholder="Hỏi Cô Minh bất cứ điều gì về tiếng Anh..."
               variant="borderless"
+              maxLength={100}
+              showCount
             />
             <AudioOutlined />
             <Button
