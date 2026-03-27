@@ -5,43 +5,22 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Layout,
-  Menu,
   Input,
   Button,
-  Typography,
-  Avatar,
-  Badge,
   message,
 } from 'antd';
 import {
   SendOutlined,
-  DashboardOutlined,
-  CommentOutlined,
-  ReadOutlined,
-  BookOutlined,
-  BulbOutlined,
-  SettingOutlined,
-  SearchOutlined,
-  BellOutlined,
   PaperClipOutlined,
   AudioOutlined,
   StarOutlined,
+  BookOutlined,
   EditOutlined,
   TranslationOutlined,
 } from '@ant-design/icons';
+import { useAuth } from './AuthProvider';
 
-const { Sider, Content, Header } = Layout;
-const { Title, Text } = Typography;
-
-const menuItems = [
-  { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: 'chat', icon: <CommentOutlined />, label: 'AI Mentor' },
-  { key: 'dictionary', icon: <BookOutlined />, label: 'Từ điển Cô Lành' },
-  { key: 'courses', icon: <ReadOutlined />, label: 'Khóa học của tôi' },
-  { key: 'library', icon: <BookOutlined />, label: 'Thư viện' },
-  { key: 'practice', icon: <BulbOutlined />, label: 'Luyện tập' },
-  { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt' },
-];
+const { Content } = Layout;
 
 const featureCards = [
   { id: 'grammar', icon: <BookOutlined />, title: 'Giải thích ngữ pháp bài 15', desc: 'Ôn lại cấu trúc câu điều kiện loại 2', prompt: 'Cô ơi, giải thích cho em ngữ pháp bài 15 về câu điều kiện loại 2 với!' },
@@ -50,15 +29,66 @@ const featureCards = [
   { id: 'writing', icon: <TranslationOutlined />, title: 'Sửa bài viết Writing Task 1', desc: 'Gửi bài luận của bạn để được góp ý', prompt: 'Cô ơi, em gửi bài viết Writing Task 1, cô sửa giúp em nhé!' },
 ];
 
+interface ChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  parts: { type: string; text: string }[];
+}
+
 export default function ChatView() {
+  const { user } = useAuth();
   const [inputValue, setInputValue] = useState('');
-  const [messages, setMessages] = useState<{ id: string; role: string; content: string; parts: { type: string; text: string }[] }[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load 20 tin nhắn cuối cùng từ Supabase khi mount
+  useEffect(() => {
+    if (!user) return;
+
+    const loadMessages = async () => {
+      try {
+        const res = await fetch(`/api/messages?userId=${user.id}`);
+        const data = await res.json();
+
+        if (res.ok && data.messages) {
+          const loaded: ChatMessage[] = data.messages.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            parts: [{ type: 'text', text: m.content }],
+          }));
+          setMessages(loaded);
+        }
+      } catch (err) {
+        console.error('Failed to load messages:', err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadMessages();
+  }, [user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Lưu tin nhắn vào Supabase
+  const saveMessage = async (role: string, content: string) => {
+    if (!user) return;
+    try {
+      await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, role, content }),
+      });
+    } catch (err) {
+      console.error('Failed to save message:', err);
+    }
+  };
 
   const handleSend = () => {
     if (!inputValue.trim() || isLoading) return;
@@ -82,7 +112,7 @@ export default function ChatView() {
     
     setIsLoading(true);
     const userMessageId = Date.now().toString();
-    const newUserMessage = {
+    const newUserMessage: ChatMessage = {
       id: userMessageId,
       role: 'user',
       content: params.text,
@@ -90,6 +120,9 @@ export default function ChatView() {
     };
     
     setMessages((prev) => [...prev, newUserMessage]);
+
+    // Lưu tin nhắn user vào Supabase
+    saveMessage('user', params.text);
 
     const assistantMsgId = (Date.now() + 1).toString();
     let accumulatedText = '';
@@ -109,7 +142,6 @@ export default function ChatView() {
       const decoder = new TextDecoder();
 
       if (reader) {
-        // Initial assistant message
         setMessages((prev) => [
           ...prev,
           { id: assistantMsgId, role: 'assistant', content: '', parts: [{ type: 'text', text: '' }] },
@@ -130,6 +162,11 @@ export default function ChatView() {
             )
           );
         }
+
+        // Lưu tin nhắn assistant vào Supabase sau khi stream xong
+        if (accumulatedText.trim()) {
+          saveMessage('assistant', accumulatedText);
+        }
       }
     } catch (err) {
       console.error('Chat error:', err);
@@ -142,7 +179,16 @@ export default function ChatView() {
     <>
       {/* Messages / Welcome */}
       <Content className="messages-container">
-        {messages.length === 0 ? (
+        {isLoadingHistory ? (
+          <div className="welcome-screen">
+            <div className="typing-indicator" style={{ padding: '40px 0' }}>
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+            </div>
+            <p style={{ color: '#94a3b8' }}>Đang tải lịch sử trò chuyện...</p>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="welcome-screen">
             <div className="welcome-icon-box"><StarOutlined /></div>
             <h1 className="welcome-title">Xin chào, tôi là Cô Minh AI</h1>

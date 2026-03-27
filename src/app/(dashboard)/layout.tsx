@@ -1,35 +1,29 @@
 'use client';
 
-import { Layout, Menu, Input, Avatar, Badge, Typography } from 'antd';
+import { Layout, Menu, Input, Avatar, Badge, Typography, Button } from 'antd';
 import {
-  DashboardOutlined,
   CommentOutlined,
   BookOutlined,
-  ReadOutlined,
-  BulbOutlined,
-  SettingOutlined,
   SearchOutlined,
   BellOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '../components/AuthProvider';
 
 const { Sider, Content, Header } = Layout;
 const { Title, Text } = Typography;
 
 const menuItems = [
-  { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/chat', icon: <CommentOutlined />, label: 'AI Mentor' },
   { key: '/dictionary', icon: <BookOutlined />, label: 'Từ điển Cô Lành' },
-  { key: '/courses', icon: <ReadOutlined />, label: 'Khóa học của tôi' },
-  { key: '/library', icon: <BookOutlined />, label: 'Thư viện' },
-  { key: '/practice', icon: <BulbOutlined />, label: 'Luyện tập' },
-  { key: '/settings', icon: <SettingOutlined />, label: 'Cài đặt' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, logout } = useAuth();
 
   const selectedKey = menuItems.find(item => pathname.startsWith(item.key))?.key || '/chat';
 
@@ -70,14 +64,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <BellOutlined style={{ fontSize: '20px', color: '#64748b' }} />
             </Badge>
             
+            <Button
+              type="text"
+              icon={<LogoutOutlined />}
+              onClick={logout}
+              style={{ color: '#64748b', fontSize: '14px' }}
+            >
+              Đăng xuất
+            </Button>
             <div className="user-profile">
               <div className="user-info">
-                <span className="user-name">Võ Minh Tâm</span>
+                <span className="user-name">{user?.display_name || user?.username || 'User'}</span>
                 <span className="user-status">Học viên Premium</span>
               </div>
               <Avatar
                 size={40}
-                src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
+                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'default'}`}
                 style={{ backgroundColor: '#f0f0f0' }}
               />
             </div>

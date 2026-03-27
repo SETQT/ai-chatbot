@@ -102,7 +102,6 @@ export default function DictionaryView() {
       return;
     }
     const word = inputValue.trim();
-    setInputValue('');
     fetchDictionary(word);
   };
 
