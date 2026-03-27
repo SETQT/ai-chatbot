@@ -699,6 +699,30 @@ body {
   box-shadow: 0 4px 8px rgba(46, 125, 50, 0.1);
 }
 
+/* ===== Thread Sidebar Styles ===== */
+.thread-menu-item {
+  height: 40px !important;
+  line-height: 40px !important;
+  margin: 2px 0 !important;
+  font-size: 13.5px !important;
+  color: #64748b !important;
+}
+
+.thread-menu-item.ant-menu-item-selected {
+  background: #f0f7ff !important;
+  color: var(--primary-blue) !important;
+}
+
+.ant-menu-item-group-title {
+  font-size: 11px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: #94a3b8 !important;
+  padding-top: 16px !important;
+  margin-bottom: 4px !important;
+}
+
 /* ===== Auth Login Page ===== */
 .auth-backdrop {
   height: 100vh;

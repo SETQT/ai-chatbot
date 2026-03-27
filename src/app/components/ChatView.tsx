@@ -19,6 +19,7 @@ import {
   TranslationOutlined,
 } from '@ant-design/icons';
 import { useAuth } from './AuthProvider';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 const { Content } = Layout;
 
@@ -33,34 +34,35 @@ interface ChatMessage {
   id: string;
   role: string;
   content: string;
-  parts: { type: string; text: string }[];
 }
 
 export default function ChatView() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const threadId = searchParams.get('threadId');
+
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load 20 tin nhắn cuối cùng từ Supabase khi mount
+  // Load tin nhắn khi threadId thay đổi
   useEffect(() => {
-    if (!user) return;
+    if (!user || !threadId) {
+      setMessages([]);
+      return;
+    }
 
     const loadMessages = async () => {
+      setIsLoadingHistory(true);
       try {
-        const res = await fetch(`/api/messages?userId=${user.id}`);
+        const res = await fetch(`/api/messages?userId=${user.id}&threadId=${threadId}`);
         const data = await res.json();
 
         if (res.ok && data.messages) {
-          const loaded: ChatMessage[] = data.messages.map((m: any) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            parts: [{ type: 'text', text: m.content }],
-          }));
-          setMessages(loaded);
+          setMessages(data.messages);
         }
       } catch (err) {
         console.error('Failed to load messages:', err);
@@ -70,20 +72,20 @@ export default function ChatView() {
     };
 
     loadMessages();
-  }, [user]);
+  }, [user, threadId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Lưu tin nhắn vào Supabase
-  const saveMessage = async (role: string, content: string) => {
-    if (!user) return;
+  // Lưu tin nhắn vào Supabase kèm theo threadId
+  const saveMessage = async (role: string, content: string, currentThreadId: string) => {
+    if (!user || !currentThreadId) return;
     try {
       await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, role, content }),
+        body: JSON.stringify({ userId: user.id, threadId: currentThreadId, role, content }),
       });
     } catch (err) {
       console.error('Failed to save message:', err);
@@ -92,8 +94,8 @@ export default function ChatView() {
 
   const handleSend = () => {
     if (!inputValue.trim() || isLoading) return;
-    if (inputValue.length > 100) {
-      message.error('Câu hỏi dài quá nè, tối đa 100 kí tự thôi nhé! 😅');
+    if (inputValue.length > 500) {
+      message.error('Câu hỏi dài quá nè, tối đa 500 kí tự thôi nhé! 😅');
       return;
     }
     const text = inputValue;
@@ -108,21 +110,43 @@ export default function ChatView() {
   };
 
   const sendMessage = async (params: { text: string }) => {
-    if (!params.text.trim()) return;
+    if (!params.text.trim() || !user) return;
     
     setIsLoading(true);
-    const userMessageId = Date.now().toString();
+    let currentThreadId = threadId;
+
+    // Nếu chưa có threadId, hãy tạo một thread mới ngay bây giờ
+    if (!currentThreadId) {
+      try {
+        const resThread = await fetch('/api/threads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, title: params.text.slice(0, 30) + (params.text.length > 30 ? '...' : '') }),
+        });
+        const threadData = await resThread.json();
+        if (resThread.ok && threadData.thread) {
+          currentThreadId = threadData.thread.id;
+          // Cập nhật URL mà không reload trang
+          router.replace(`/chat?threadId=${currentThreadId}`, { scroll: false });
+        } else {
+          throw new Error('Could not create thread');
+        }
+      } catch (err) {
+        console.error('Thread creation error:', err);
+        message.error('Không thể tạo cuộc hội thoại mới.');
+        setIsLoading(false);
+        return;
+      }
+    }
+
     const newUserMessage: ChatMessage = {
-      id: userMessageId,
+      id: Date.now().toString(),
       role: 'user',
       content: params.text,
-      parts: [{ type: 'text', text: params.text }],
     };
     
     setMessages((prev) => [...prev, newUserMessage]);
-
-    // Lưu tin nhắn user vào Supabase
-    saveMessage('user', params.text);
+    saveMessage('user', params.text, currentThreadId!);
 
     const assistantMsgId = (Date.now() + 1).toString();
     let accumulatedText = '';
@@ -144,7 +168,7 @@ export default function ChatView() {
       if (reader) {
         setMessages((prev) => [
           ...prev,
-          { id: assistantMsgId, role: 'assistant', content: '', parts: [{ type: 'text', text: '' }] },
+          { id: assistantMsgId, role: 'assistant', content: '' },
         ]);
 
         while (true) {
@@ -157,15 +181,14 @@ export default function ChatView() {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMsgId
-                ? { ...msg, content: accumulatedText, parts: [{ type: 'text', text: accumulatedText }] }
+                ? { ...msg, content: accumulatedText }
                 : msg
             )
           );
         }
 
-        // Lưu tin nhắn assistant vào Supabase sau khi stream xong
         if (accumulatedText.trim()) {
-          saveMessage('assistant', accumulatedText);
+          saveMessage('assistant', accumulatedText, currentThreadId!);
         }
       }
     } catch (err) {
@@ -177,7 +200,6 @@ export default function ChatView() {
 
   return (
     <>
-      {/* Messages / Welcome */}
       <Content className="messages-container">
         {isLoadingHistory ? (
           <div className="welcome-screen">
@@ -186,7 +208,7 @@ export default function ChatView() {
               <div className="typing-dot"></div>
               <div className="typing-dot"></div>
             </div>
-            <p style={{ color: '#94a3b8' }}>Đang tải lịch sử trò chuyện...</p>
+            <p style={{ color: '#94a3b8' }}>Đang tải tin nhắn...</p>
           </div>
         ) : messages.length === 0 ? (
           <div className="welcome-screen">
@@ -235,18 +257,22 @@ export default function ChatView() {
         )}
       </Content>
 
-      {/* Input Area */}
       <div className="chat-input-wrapper">
         <div className="chat-input-container">
           <PaperClipOutlined />
-          <Input
+          <Input.TextArea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onPressEnter={handleSend}
-            placeholder="Hỏi Cô Minh bất cứ điều gì về tiếng Anh..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Hỏi Cô Minh..."
             variant="borderless"
-            maxLength={100}
-            showCount
+            autoSize={{ minRows: 1, maxRows: 6 }}
+            maxLength={500}
           />
           <AudioOutlined />
           <Button
@@ -257,7 +283,7 @@ export default function ChatView() {
             disabled={!inputValue.trim() || isLoading}
           />
         </div>
-        <div className="disclaimer-text">AI CÓ THỂ ĐƯA RA CÂU TRẢ LỜI CHƯA CHÍNH XÁC, HÃY LUÔN KIỂM CHỨNG LẠI VỚI GIÁO VIÊN.</div>
+        <div className="disclaimer-text">AI CÓ THỂ ĐƯA RA CÂU TRẢ LỜI CHƯA CHÍNH XÁC.</div>
       </div>
     </>
   );
