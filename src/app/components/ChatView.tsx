@@ -7,7 +7,7 @@ import {
   Layout,
   Input,
   Button,
-  message,
+  App,
 } from 'antd';
 import {
   SendOutlined,
@@ -32,11 +32,12 @@ const featureCards = [
 
 interface ChatMessage {
   id: string;
-  role: string;
+  role: 'user' | 'assistant';
   content: string;
 }
 
 export default function ChatView() {
+  const { message } = App.useApp();
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -48,7 +49,7 @@ export default function ChatView() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load tin nhắn khi threadId thay đổi
+  // Load tin nhắn
   useEffect(() => {
     if (!user || !threadId) {
       setMessages([]);
@@ -60,7 +61,6 @@ export default function ChatView() {
       try {
         const res = await fetch(`/api/messages?userId=${user.id}&threadId=${threadId}`);
         const data = await res.json();
-
         if (res.ok && data.messages) {
           setMessages(data.messages);
         }
@@ -78,27 +78,21 @@ export default function ChatView() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Lưu tin nhắn vào Supabase kèm theo threadId
-  const saveMessage = async (role: string, content: string, currentThreadId: string) => {
-    if (!user || !currentThreadId) return;
-    try {
-      await fetch('/api/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, threadId: currentThreadId, role, content }),
-      });
-    } catch (err) {
-      console.error('Failed to save message:', err);
-    }
-  };
-
   const handleSend = () => {
-    if (!inputValue.trim() || isLoading) return;
-    if (inputValue.length > 500) {
-      message.error('Câu hỏi dài quá nè, tối đa 500 kí tự thôi nhé! 😅');
+    const text = inputValue.trim();
+    if (!text) return;
+    
+    if (isLoading) {
+      message.loading('Đang xử lý câu hỏi trước đó...', 1);
       return;
     }
-    const text = inputValue;
+
+    if (text.length > 500) {
+      message.error('Câu hỏi tối đa 500 ký tự thôi nè! 😅');
+      return;
+    }
+
+    // Xóa input ngay lập tức trước khi làm bất cứ việc gì khác
     setInputValue('');
     sendMessage({ text });
   };
@@ -115,84 +109,92 @@ export default function ChatView() {
     setIsLoading(true);
     let currentThreadId = threadId;
 
-    // Nếu chưa có threadId, hãy tạo một thread mới ngay bây giờ
+    // 1. Thread handling
     if (!currentThreadId) {
       try {
         const resThread = await fetch('/api/threads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, title: params.text.slice(0, 30) + (params.text.length > 30 ? '...' : '') }),
+          body: JSON.stringify({ userId: user.id, title: params.text.slice(0, 30) }),
         });
         const threadData = await resThread.json();
         if (resThread.ok && threadData.thread) {
           currentThreadId = threadData.thread.id;
-          // Cập nhật URL mà không reload trang
           router.replace(`/chat?threadId=${currentThreadId}`, { scroll: false });
         } else {
-          throw new Error('Could not create thread');
+          throw new Error('Thread creation failed');
         }
       } catch (err) {
-        console.error('Thread creation error:', err);
-        message.error('Không thể tạo cuộc hội thoại mới.');
         setIsLoading(false);
+        message.error('Lỗi tạo hội thoại.');
         return;
       }
     }
 
-    const newUserMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: params.text,
-    };
-    
-    setMessages((prev) => [...prev, newUserMessage]);
-    saveMessage('user', params.text, currentThreadId!);
+    // 2. Save User Message & Check Quota
+    try {
+      const saveRes = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, threadId: currentThreadId, role: 'user', content: params.text }),
+      });
+      const saveData = await saveRes.json();
 
-    const assistantMsgId = (Date.now() + 1).toString();
+      if (!saveRes.ok) {
+        message.warning(saveData.error);
+        setIsLoading(false);
+        return;
+      }
+
+      setMessages((prev) => [...prev, { id: saveData.message.id, role: 'user', content: params.text }]);
+    } catch (err) {
+      setIsLoading(false);
+      message.error('Lỗi server!');
+      return;
+    }
+
+    // 3. AI response
     let accumulatedText = '';
+    const assistantMsgId = Date.now().toString();
 
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: [...messages, newUserMessage].map(m => ({ role: m.role, content: m.content })) 
+          messages: [...messages, { role: 'user', content: params.text }].map(m => ({ role: m.role, content: m.content })) 
         }),
       });
 
-      if (!resp.ok) throw new Error('Failed to fetch chat');
+      if (!resp.ok) throw new Error('AI Error');
 
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
 
       if (reader) {
-        setMessages((prev) => [
-          ...prev,
-          { id: assistantMsgId, role: 'assistant', content: '' },
-        ]);
+        setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '' }]);
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          accumulatedText += chunk;
-
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMsgId
-                ? { ...msg, content: accumulatedText }
-                : msg
-            )
+          accumulatedText += decoder.decode(value, { stream: true });
+          
+          setMessages((prev) => 
+            prev.map(m => m.id === assistantMsgId ? { ...m, content: accumulatedText } : m)
           );
         }
 
+        // 4. Save Assistant Response
         if (accumulatedText.trim()) {
-          saveMessage('assistant', accumulatedText, currentThreadId!);
+          await fetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, threadId: currentThreadId, role: 'assistant', content: accumulatedText }),
+          });
         }
       }
     } catch (err) {
-      console.error('Chat error:', err);
+      console.error(err);
     } finally {
       setIsLoading(false);
     }
@@ -203,21 +205,13 @@ export default function ChatView() {
       <Content className="messages-container">
         {isLoadingHistory ? (
           <div className="welcome-screen">
-            <div className="typing-indicator" style={{ padding: '40px 0' }}>
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
-            </div>
-            <p style={{ color: '#94a3b8' }}>Đang tải tin nhắn...</p>
+            <div className="typing-indicator" style={{ padding: '40px 0' }}><div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div></div>
           </div>
         ) : messages.length === 0 ? (
           <div className="welcome-screen">
             <div className="welcome-icon-box"><StarOutlined /></div>
             <h1 className="welcome-title">Xin chào, tôi là Cô Minh AI</h1>
-            <p className="welcome-subtitle">
-              Tôi có thể giúp bạn giải thích ngữ pháp, luyện giao tiếp<br />hoặc kiểm tra từ vựng hôm nay.
-            </p>
-            
+            <p className="welcome-subtitle">Tôi có thể giúp bạn học tiếng Anh mỗi ngày.</p>
             <div className="feature-grid">
               {featureCards.map((card) => (
                 <div key={card.id} className="feature-card" onClick={() => onFeatureClick(card.prompt)}>
@@ -235,20 +229,14 @@ export default function ChatView() {
             {messages.map((m) => (
               <div key={m.id} className={`message-item ${m.role === 'user' ? 'user' : 'assistant'}`}>
                 <div className="bubble">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {m.content}
-                  </ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                 </div>
               </div>
             ))}
             {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
               <div className="message-item assistant">
                 <div className="bubble">
-                  <div className="typing-indicator">
-                    <div className="typing-dot"></div>
-                    <div className="typing-dot"></div>
-                    <div className="typing-dot"></div>
-                  </div>
+                  <div className="typing-indicator"><div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div></div>
                 </div>
               </div>
             )}
@@ -263,8 +251,8 @@ export default function ChatView() {
           <Input.TextArea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+            onPressEnter={(e) => {
+              if (!e.shiftKey) {
                 e.preventDefault();
                 handleSend();
               }
@@ -272,7 +260,6 @@ export default function ChatView() {
             placeholder="Hỏi Cô Minh..."
             variant="borderless"
             autoSize={{ minRows: 1, maxRows: 6 }}
-            maxLength={500}
           />
           <AudioOutlined />
           <Button

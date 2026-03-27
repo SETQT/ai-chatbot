@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import {
+  App,
   Input,
   Button,
   Typography,
@@ -9,7 +10,6 @@ import {
   Tag,
   Space,
   Spin,
-  message,
   Descriptions,
 } from 'antd';
 import {
@@ -29,6 +29,7 @@ interface DictionaryResult {
 }
 
 export default function DictionaryView() {
+  const { message } = App.useApp();
   const [inputValue, setInputValue] = useState('');
   const [object, setObject] = useState<DictionaryResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
