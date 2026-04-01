@@ -136,14 +136,37 @@ export default function FuelView() {
                           const label = TOOL_LABELS[toolName] || toolName;
                           const state = part.state || part.status;
                           const isFinished = state === 'result' || state === 'output-available' || state === 'finished';
-                          
+                          const args = part.input || part.args || part.toolInvocation?.args || {};
+
                           return (
                             <div key={pIdx} className={`tool-status-badge ${isFinished ? 'finished' : 'active'}`}>
-                              {isFinished ? '✅ ' : '🚀 '}
-                              {label} {isFinished ? 'thành công' : '...'}
-                              {!isFinished && (
-                                <div className="typing-indicator mini" style={{ display: 'inline-flex', marginLeft: 8 }}>
-                                  <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
+                              <div className="badge-main">
+                                {isFinished ? '✅ ' : '🚀 '}
+                                {label} {isFinished ? 'thành công' : '...'}
+                                {!isFinished && (
+                                  <div className="typing-indicator mini" style={{ display: 'inline-flex', marginLeft: 8 }}>
+                                    <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
+                                  </div>
+                                )}
+                              </div>
+                              {/* Display all input parameters EXCEPT technical 'reason' */}
+                              {args && Object.keys(args).filter(k => k !== 'reason').length > 0 && (
+                                <div className="tool-args">
+                                  {Object.entries(args)
+                                    .filter(([key]) => key !== 'reason')
+                                    .map(([key, val]) => (
+                                      <div key={key} style={{ display: 'flex', gap: 4 }}>
+                                        <span style={{ opacity: 0.8, fontWeight: 700 }}>{key}:</span>
+                                        <span style={{ 
+                                          overflow: 'hidden', 
+                                          textOverflow: 'ellipsis', 
+                                          whiteSpace: 'nowrap',
+                                          maxWidth: '300px'
+                                        }}>
+                                          {typeof val === 'string' ? val : JSON.stringify(val)}
+                                        </span>
+                                      </div>
+                                    ))}
                                 </div>
                               )}
                             </div>
