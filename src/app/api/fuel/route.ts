@@ -96,7 +96,7 @@ export async function POST(req: Request) {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                username: "Kiều Xăng Dầu",
+                username: "Trợ lý Xăng Dầu",
                 avatar_url: "https://i.imgur.com/8n7Y7f7.png", // Thêm avatar cho nhây
                 content: `🚀 **BÁO CÁO GIÁ XĂNG DẦU HÔM NAY** 🚀\n${content}\n_Chúc đại ca một ngày làm việc hiệu quả!_`
               }),

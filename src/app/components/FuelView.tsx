@@ -33,7 +33,7 @@ const suggestionCards = [
     icon: <NotificationOutlined />,
     title: 'Gửi báo cáo Discord',
     desc: 'Tra giá và gửi báo cáo lên kênh Discord',
-    prompt: 'Tra giá xăng rồi gửi lên Discord giúp Kiều!',
+    prompt: 'Tra giá xăng rồi gửi lên Discord',
   },
 ];
 
@@ -116,7 +116,7 @@ export default function FuelView() {
                 .map((part: any) => part.text)
                 .join('');
 
-              const toolParts = (m.parts ?? []).filter((part: any) => 
+              const toolParts = (m.parts ?? []).filter((part: any) =>
                 String(part.type).startsWith('tool') || part.type === 'dynamic-tool'
               );
 
@@ -132,7 +132,7 @@ export default function FuelView() {
                           const type = String(part.type || '');
                           const toolName = part.toolName || (type.startsWith('tool-') ? type.replace('tool-', '') : null) || part.toolInvocation?.toolName;
                           if (!toolName || toolName === 'invocation' || toolName === 'call') return null;
-                          
+
                           const label = TOOL_LABELS[toolName] || toolName;
                           const state = part.state || part.status;
                           const isFinished = state === 'result' || state === 'output-available' || state === 'finished';
@@ -157,9 +157,9 @@ export default function FuelView() {
                                     .map(([key, val]) => (
                                       <div key={key} style={{ display: 'flex', gap: 4 }}>
                                         <span style={{ opacity: 0.8, fontWeight: 700 }}>{key}:</span>
-                                        <span style={{ 
-                                          overflow: 'hidden', 
-                                          textOverflow: 'ellipsis', 
+                                        <span style={{
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
                                           whiteSpace: 'nowrap',
                                           maxWidth: '300px'
                                         }}>
